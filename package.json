@@ -1,0 +1,12 @@
+{
+  "name": "hcraes",
+  "version": "0.1.0",
+  "description": "tiny BM25 search engine, zero deps, native node TS",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=23.6" },
+  "scripts": {
+    "search": "node src/main.ts",
+    "test": "node src/tests.ts"
+  }
+}

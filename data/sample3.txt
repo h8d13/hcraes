@@ -1,0 +1,1 @@
+An inverted index maps terms to the documents containing them. It is the core data structure behind most full-text search engines.
