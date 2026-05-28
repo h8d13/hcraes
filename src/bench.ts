@@ -1,6 +1,8 @@
 import { performance } from "node:perf_hooks";
 import { wikipedia } from "./sources/wikipedia.ts";
 import { hackerNews } from "./sources/hn.ts";
+import { github } from "./sources/github.ts";
+import { stackexchange } from "./sources/stackexchange.ts";
 import { rrf } from "./fusion.ts";
 import { InvertedIndex } from "./index_store.ts";
 import { search as bm25 } from "./search.ts";
@@ -8,7 +10,7 @@ import type { Source, Trace } from "./sources/types.ts";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-const SOURCES: Source[] = [wikipedia, hackerNews];
+const SOURCES: Source[] = [wikipedia, hackerNews, github, stackexchange];
 
 function blankTrace(): Trace {
   return { fetchWallMs: 0, readMs: 0, parseMs: 0, transformMs: 0, bytes: 0, batches: 0 };

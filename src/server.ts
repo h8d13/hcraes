@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { performance } from "node:perf_hooks";
-import { runSearch, SOURCES, prewarm } from "./pipeline.ts";
+import { runSearchStream, SOURCES, prewarm } from "./pipeline.ts";
 
 const PORT = parseInt(process.env.PORT ?? "8080", 10);
 
@@ -65,41 +65,6 @@ function indexPage(): string {
   `);
 }
 
-function resultsPage(query: string, depth: number, r: Awaited<ReturnType<typeof runSearch>>): string {
-  const hits = r.hits.slice(0, 30);
-  const body = hits.length === 0
-    ? `<p class="empty">no hits for "${esc(query)}"</p>`
-    : `<ol class="hits">${hits.map(h => `
-        <li class="hit">
-          <div class="hit-title">
-            <a href="${esc(h.url)}" rel="noopener">${esc(h.title)}</a>
-            <span class="badges">${h.sources.map(s => `<span class="badge">${esc(s)}</span>`).join("")}</span>
-            <span class="score">${h.score.toFixed(3)}</span>
-          </div>
-          <div class="hit-url">${esc(h.url)}</div>
-          ${h.snippet ? `<div class="hit-snippet">${esc(h.snippet.slice(0, 240))}</div>` : ""}
-        </li>`).join("")}</ol>`;
-
-  const breakdown = r.outcomes.map(o =>
-    o.ok
-      ? `<code>${o.name}</code> ${o.count} (${o.trace.batches}b, ${(o.trace.bytes/1024).toFixed(0)}KB, ${o.trace.fetchWallMs.toFixed(0)}ms)`
-      : `<code>${o.name}</code> FAIL`
-  ).join(" &middot; ");
-
-  return layout(`${query} — hcraes`, `
-    <h1><a href="/">hcraes</a></h1>
-    ${searchForm(query, depth)}
-    ${body}
-    <p class="meta">
-      ${breakdown}<br>
-      ${r.uniqueCount} unique fused hits &middot;
-      fan-out ${r.timings.fanOutMs.toFixed(0)}ms &middot;
-      RRF ${r.timings.rrfMs.toFixed(1)}ms &middot;
-      rerank ${r.timings.rerankMs.toFixed(1)}ms &middot;
-      total <strong>${r.timings.totalMs.toFixed(0)}ms</strong>${r.cached ? ' <span class="badge">cached</span>' : ''}
-    </p>
-  `);
-}
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
@@ -112,15 +77,33 @@ const server = createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/search") {
       const query = (url.searchParams.get("q") ?? "").trim();
       const depth = Math.max(10, Math.min(1000, parseInt(url.searchParams.get("depth") ?? "100", 10) || 100));
-      if (!query) {
-        res.writeHead(302, { location: "/" });
-        res.end();
-        return;
+      if (!query) { res.writeHead(302, { location: "/" }); res.end(); return; }
+
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache", "x-accel-buffering": "no" });
+      res.write(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(query)} — hcraes</title><style>${CSS} .arr{color:#15803d;font-size:.85em;margin:.4em 0}</style></head><body>`);
+      res.write(`<h1><a href="/">hcraes</a></h1>${searchForm(query, depth)}<p class="arr">streaming sources as they land...</p>`);
+
+      const t0 = performance.now();
+      for await (const ev of runSearchStream(query, depth)) {
+        if (ev.type === "source") {
+          const dt = (performance.now() - t0).toFixed(0);
+          const status = ev.ok ? `${ev.results.length} hits in ${ev.ms.toFixed(0)}ms` : `FAIL (${ev.err})`;
+          res.write(`<p class="arr">↳ <strong>${ev.name}</strong> @ ${dt}ms · ${status}</p>`);
+        } else {
+          res.write(`<ol class="hits">${ev.hits.slice(0, 30).map(h => `
+            <li class="hit">
+              <div class="hit-title"><a href="${esc(h.url)}" rel="noopener">${esc(h.title)}</a>
+                <span class="badges">${h.sources.map(s => `<span class="badge">${esc(s)}</span>`).join("")}</span>
+                <span class="score">${h.score.toFixed(3)}</span></div>
+              <div class="hit-url">${esc(h.url)}</div>
+              ${h.snippet ? `<div class="hit-snippet">${esc(h.snippet.slice(0, 240))}</div>` : ""}
+            </li>`).join("")}</ol>
+            <p class="meta">${ev.uniqueCount} unique fused · fan-out ${ev.timings.fanOutMs.toFixed(0)}ms · RRF ${ev.timings.rrfMs.toFixed(1)}ms · rerank ${ev.timings.rerankMs.toFixed(1)}ms · total <strong>${ev.timings.totalMs.toFixed(0)}ms</strong></p>`);
+        }
+        if (typeof (res as any).flush === "function") (res as any).flush();
       }
-      const r = await runSearch(query, depth);
-      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-      res.end(resultsPage(query, depth, r));
-      console.log(`[${new Date().toISOString()}] "${query}" depth=${depth} -> ${r.hits.length} hits in ${r.timings.totalMs.toFixed(0)}ms`);
+      res.end(`</body></html>`);
+      console.log(`[${new Date().toISOString()}] "${query}" depth=${depth}`);
       return;
     }
     res.writeHead(404, { "content-type": "text/plain" });

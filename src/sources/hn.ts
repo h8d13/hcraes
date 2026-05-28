@@ -4,7 +4,7 @@ import type { Source, RawResult } from "./types.ts";
 const BATCH = 100;
 const MAX = 1000;
 
-async function fetchPage(query: string, hitsPerPage: number, page: number, signal: AbortSignal): Promise<{ results: RawResult[]; bytes: number; readMs: number; parseMs: number; transformMs: number }> {
+async function fetchPage(query: string, hitsPerPage: number, page: number, signal: AbortSignal): Promise<{ results: RawResult[]; nbPages: number; bytes: number; readMs: number; parseMs: number; transformMs: number }> {
   const url = new URL("https://hn.algolia.com/api/v1/search");
   url.search = new URLSearchParams({
     query, hitsPerPage: String(hitsPerPage), page: String(page), tags: "story"
@@ -15,7 +15,7 @@ async function fetchPage(query: string, hitsPerPage: number, page: number, signa
   if (!res.ok) throw new Error(`hn ${res.status}`);
   const body = await res.text();
   const t2 = performance.now();
-  const json = JSON.parse(body) as { hits?: Array<{ title?: string; url?: string; story_text?: string; objectID: string }> };
+  const json = JSON.parse(body) as { hits?: Array<{ title?: string; url?: string; story_text?: string; objectID: string }>; nbPages?: number };
   const t3 = performance.now();
 
   const results = (json.hits ?? [])
@@ -27,7 +27,7 @@ async function fetchPage(query: string, hitsPerPage: number, page: number, signa
       rank: page * hitsPerPage + i
     }));
   const t4 = performance.now();
-  return { results, bytes: body.length, readMs: t2 - t1, parseMs: t3 - t2, transformMs: t4 - t3 };
+  return { results, nbPages: json.nbPages ?? 1, bytes: body.length, readMs: t2 - t1, parseMs: t3 - t2, transformMs: t4 - t3 };
 }
 
 export const hackerNews: Source = {
@@ -38,8 +38,8 @@ export const hackerNews: Source = {
     const want = Math.min(opts.count ?? this.defaultCount, MAX);
     const batches = Math.ceil(want / BATCH);
     const trace = opts.trace;
-
     const wallStart = performance.now();
+
     const settled = await Promise.allSettled(
       Array.from({ length: batches }, (_, i) => fetchPage(query, BATCH, i, signal))
     );

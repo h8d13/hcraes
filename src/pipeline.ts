@@ -108,6 +108,42 @@ export async function runSearch(query: string, depth: number): Promise<SearchRes
   return result;
 }
 
+export type StreamEvent =
+  | { type: "source"; name: string; ok: boolean; ms: number; results: RawResult[]; trace: Trace; err?: string }
+  | { type: "final"; hits: FusedHit[]; timings: { fanOutMs: number; rrfMs: number; rerankMs: number; totalMs: number }; uniqueCount: number };
+
+export async function* runSearchStream(query: string, depth: number): AsyncGenerator<StreamEvent> {
+  const t0 = performance.now();
+  const perSource = new Map<string, RawResult[]>();
+
+  const tagged = SOURCES.map((s) => {
+    const ctrl = new AbortController();
+    const trace = blankTrace();
+    const start = performance.now();
+    return withTimeout(s.search(query, ctrl.signal, { count: depth, trace }), TIMEOUT_MS, ctrl)
+      .then(results => ({ name: s.name, ok: true, ms: performance.now() - start, results, trace }))
+      .catch(e => ({ name: s.name, ok: false, ms: performance.now() - start, results: [] as RawResult[], trace, err: e?.message ?? String(e) }));
+  });
+
+  const remaining = new Set(tagged.map((p, i) => ({ p, i })));
+  while (remaining.size > 0) {
+    const arr = [...remaining];
+    const winner = await Promise.race(arr.map(x => x.p.then(v => ({ x, v }))));
+    remaining.delete(winner.x);
+    perSource.set(winner.v.name, winner.v.results);
+    yield { type: "source", ...winner.v };
+  }
+
+  const t1 = performance.now();
+  const fused = rrf(perSource, SOURCES);
+  const t2 = performance.now();
+  const hits = localRerank(query, fused);
+  const t3 = performance.now();
+
+  yield { type: "final", hits, uniqueCount: fused.length,
+    timings: { fanOutMs: t1 - t0, rrfMs: t2 - t1, rerankMs: t3 - t2, totalMs: t3 - t0 } };
+}
+
 export async function prewarm(): Promise<void> {
   await Promise.allSettled(SOURCES.map(s => {
     const ctrl = new AbortController();

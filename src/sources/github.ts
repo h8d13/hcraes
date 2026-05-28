@@ -13,7 +13,7 @@ type RepoItem = {
   language: string | null;
 };
 
-async function fetchPage(query: string, perPage: number, page: number, signal: AbortSignal): Promise<{ results: RawResult[]; bytes: number; readMs: number; parseMs: number; transformMs: number }> {
+async function fetchPage(query: string, perPage: number, page: number, signal: AbortSignal): Promise<{ results: RawResult[]; totalCount: number; bytes: number; readMs: number; parseMs: number; transformMs: number }> {
   const url = new URL("https://api.github.com/search/repositories");
   url.search = new URLSearchParams({
     q: query, per_page: String(perPage), page: String(page)
@@ -32,7 +32,7 @@ async function fetchPage(query: string, perPage: number, page: number, signal: A
   if (!res.ok) throw new Error(`github ${res.status}${res.status === 403 ? " (rate limit)" : ""}`);
   const body = await res.text();
   const t2 = performance.now();
-  const json = JSON.parse(body) as { items?: RepoItem[] };
+  const json = JSON.parse(body) as { items?: RepoItem[]; total_count?: number };
   const t3 = performance.now();
 
   const startRank = (page - 1) * perPage;
@@ -47,7 +47,7 @@ async function fetchPage(query: string, perPage: number, page: number, signal: A
     };
   });
   const t4 = performance.now();
-  return { results, bytes: body.length, readMs: t2 - t1, parseMs: t3 - t2, transformMs: t4 - t3 };
+  return { results, totalCount: json.total_count ?? results.length, bytes: body.length, readMs: t2 - t1, parseMs: t3 - t2, transformMs: t4 - t3 };
 }
 
 export const github: Source = {
@@ -58,8 +58,8 @@ export const github: Source = {
     const want = Math.min(opts.count ?? this.defaultCount, MAX);
     const batches = Math.ceil(want / PER_PAGE);
     const trace = opts.trace;
-
     const wallStart = performance.now();
+
     const settled = await Promise.allSettled(
       Array.from({ length: batches }, (_, i) => fetchPage(query, PER_PAGE, i + 1, signal))
     );
