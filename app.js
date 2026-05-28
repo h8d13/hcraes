@@ -14,20 +14,31 @@ function renderArrival(name, ok, ms, count, err) {
     `<p class="arr">↳ <strong>${esc(name)}</strong> @ ${dt}ms · ${status}</p>`);
 }
 
+const PAGE_SIZE = 30;
+
+function renderHit(h) {
+  return `<li class="hit">
+    <div class="hit-title">
+      <a href="${esc(h.url)}" rel="noopener" target="_blank">${esc(h.title)}</a>
+      <span class="badges">${h.sources.map(s => `<span class="badge">${esc(s)}</span>`).join("")}</span>
+      <span class="score">${h.score.toFixed(3)}</span>
+    </div>
+    <div class="hit-url">${esc(h.url)}</div>
+    ${h.snippet ? `<div class="hit-snippet">${esc(h.snippet.slice(0, 240))}</div>` : ""}
+  </li>`;
+}
+
 function renderHits(hits, uniqueCount, timings) {
-  const lis = hits.slice(0, 30).map(h => `
-    <li class="hit">
-      <div class="hit-title">
-        <a href="${esc(h.url)}" rel="noopener" target="_blank">${esc(h.title)}</a>
-        <span class="badges">${h.sources.map(s => `<span class="badge">${esc(s)}</span>`).join("")}</span>
-        <span class="score">${h.score.toFixed(3)}</span>
-      </div>
-      <div class="hit-url">${esc(h.url)}</div>
-      ${h.snippet ? `<div class="hit-snippet">${esc(h.snippet.slice(0, 240))}</div>` : ""}
-    </li>`).join("");
-  $("#results").innerHTML = `<ol class="hits">${lis}</ol>`;
-  $("#meta").innerHTML =
-    `${uniqueCount} unique fused · fan-out ${timings.fanOutMs.toFixed(0)}ms · RRF ${timings.rrfMs.toFixed(1)}ms · rerank ${timings.rerankMs.toFixed(1)}ms · total <strong>${timings.totalMs.toFixed(0)}ms</strong>`;
+  let shown = Math.min(PAGE_SIZE, hits.length);
+  const paint = () => {
+    $("#results").innerHTML = `<ol class="hits">${hits.slice(0, shown).map(renderHit).join("")}</ol>` +
+      (shown < hits.length ? `<button id="more" type="button">load ${Math.min(PAGE_SIZE, hits.length - shown)} more (${hits.length - shown} remaining)</button>` : "");
+    $("#meta").innerHTML =
+      `showing ${shown}/${hits.length} · ${uniqueCount} unique fused · fan-out ${timings.fanOutMs.toFixed(0)}ms · RRF ${timings.rrfMs.toFixed(1)}ms · rerank ${timings.rerankMs.toFixed(1)}ms · total <strong>${timings.totalMs.toFixed(0)}ms</strong>`;
+    const btn = $("#more");
+    if (btn) btn.onclick = () => { shown = Math.min(shown + PAGE_SIZE, hits.length); paint(); };
+  };
+  paint();
 }
 
 const CACHE_TTL = 60_000;
