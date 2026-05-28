@@ -51,5 +51,5 @@ export function makeGitlab(name, baseUrl, opts = {}) {
 }
 
 export const gitlab = makeGitlab("gitlab", "https://gitlab.com");
-export const gitlabArch = makeGitlab("gitlab-arch", "https://gitlab.archlinux.org", { group: "archlinux" });
+export const gitlabArch = makeGitlab("gitlab-arch", "https://gitlab.archlinux.org");
 export const gitlabAlpine = makeGitlab("gitlab-alpine", "https://gitlab.alpinelinux.org");
