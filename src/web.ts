@@ -1,6 +1,6 @@
 import { runSearch, SOURCES } from "./pipeline.ts";
 
-const DEFAULT_DEPTH = 200;
+const DEFAULT_DEPTH = 100;
 const TOP_K = 20;
 
 function parseArgs(argv: string[]): { query: string; depth: number; topK: number } {
@@ -41,7 +41,7 @@ async function main(): Promise<void> {
     if (o.ok) console.error(`  ${o.name.padEnd(10)} ${String(o.count).padStart(4)} results, ${o.trace.batches} batches, ${(o.trace.bytes/1024).toFixed(1)}KB, fetch wall ${o.trace.fetchWallMs.toFixed(0)}ms`);
     else console.error(`  ${o.name.padEnd(10)} FAIL ${o.err}`);
   }
-  console.error(`# fan-out ${r.timings.fanOutMs.toFixed(0)}ms | RRF ${r.timings.rrfMs.toFixed(1)}ms | rerank ${r.timings.rerankMs.toFixed(1)}ms | total ${r.timings.totalMs.toFixed(0)}ms`);
+  console.error(`# fan-out ${r.timings.fanOutMs.toFixed(0)}ms | RRF ${r.timings.rrfMs.toFixed(1)}ms | rerank ${r.timings.rerankMs.toFixed(1)}ms | total ${r.timings.totalMs.toFixed(0)}ms${r.cached ? " (CACHED)" : ""}`);
   console.error(`# ${r.uniqueCount} unique fused hits, showing top ${Math.min(topK, r.hits.length)}`);
 }
 

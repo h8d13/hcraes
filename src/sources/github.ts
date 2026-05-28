@@ -2,8 +2,8 @@ import { performance } from "node:perf_hooks";
 import type { Source, RawResult } from "./types.ts";
 
 const UA = "hcraes/0.1";
-const BATCH = 100;
-const MAX = 300;
+const PER_PAGE = 10;
+const MAX = 30;
 
 type RepoItem = {
   full_name: string;
@@ -16,19 +16,20 @@ type RepoItem = {
 async function fetchPage(query: string, perPage: number, page: number, signal: AbortSignal): Promise<{ results: RawResult[]; bytes: number; readMs: number; parseMs: number; transformMs: number }> {
   const url = new URL("https://api.github.com/search/repositories");
   url.search = new URLSearchParams({
-    q: query, per_page: String(perPage), page: String(page), sort: "best-match"
+    q: query, per_page: String(perPage), page: String(page)
   }).toString();
 
-  const res = await fetch(url, {
-    signal,
-    headers: {
-      "user-agent": UA,
-      "accept": "application/vnd.github+json",
-      "x-github-api-version": "2022-11-28"
-    }
-  });
+  const headers: Record<string, string> = {
+    "user-agent": UA,
+    "accept": "application/vnd.github+json",
+    "x-github-api-version": "2022-11-28"
+  };
+  const token = process.env.GITHUB_TOKEN;
+  if (token) headers.authorization = `Bearer ${token}`;
+
+  const res = await fetch(url, { signal, headers });
   const t1 = performance.now();
-  if (!res.ok) throw new Error(`github ${res.status}${res.status === 403 ? " (rate limit, unauth=10/min)" : ""}`);
+  if (!res.ok) throw new Error(`github ${res.status}${res.status === 403 ? " (rate limit)" : ""}`);
   const body = await res.text();
   const t2 = performance.now();
   const json = JSON.parse(body) as { items?: RepoItem[] };
@@ -51,16 +52,16 @@ async function fetchPage(query: string, perPage: number, page: number, signal: A
 
 export const github: Source = {
   name: "github",
-  weight: 0.8,
-  defaultCount: 100,
+  weight: 0.9,
+  defaultCount: 10,
   async search(query, signal, opts = {}) {
     const want = Math.min(opts.count ?? this.defaultCount, MAX);
-    const batches = Math.ceil(want / BATCH);
+    const batches = Math.ceil(want / PER_PAGE);
     const trace = opts.trace;
 
     const wallStart = performance.now();
     const settled = await Promise.allSettled(
-      Array.from({ length: batches }, (_, i) => fetchPage(query, BATCH, i + 1, signal))
+      Array.from({ length: batches }, (_, i) => fetchPage(query, PER_PAGE, i + 1, signal))
     );
     const fetchWallMs = performance.now() - wallStart;
 

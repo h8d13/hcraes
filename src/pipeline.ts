@@ -2,13 +2,16 @@ import { performance } from "node:perf_hooks";
 import { wikipedia } from "./sources/wikipedia.ts";
 import { hackerNews } from "./sources/hn.ts";
 import { github } from "./sources/github.ts";
+import { stackexchange } from "./sources/stackexchange.ts";
 import { rrf, type FusedHit } from "./fusion.ts";
 import { InvertedIndex } from "./index_store.ts";
 import { search as bm25 } from "./search.ts";
 import type { Source, RawResult, Trace } from "./sources/types.ts";
 
-export const SOURCES: Source[] = [wikipedia, hackerNews, github];
-const TIMEOUT_MS = 15000;
+export const SOURCES: Source[] = [wikipedia, hackerNews, github, stackexchange];
+const TIMEOUT_MS = 4000;
+const CACHE_TTL_MS = 60_000;
+const CACHE_MAX = 200;
 
 export type SourceOutcome = { name: string; ok: boolean; count: number; trace: Trace; err?: string };
 export type SearchResult = {
@@ -18,7 +21,25 @@ export type SearchResult = {
   query: string;
   depth: number;
   uniqueCount: number;
+  cached: boolean;
 };
+
+const cache = new Map<string, { ts: number; result: SearchResult }>();
+
+function cacheGet(key: string): SearchResult | null {
+  const hit = cache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.ts > CACHE_TTL_MS) { cache.delete(key); return null; }
+  return hit.result;
+}
+
+function cachePut(key: string, result: SearchResult): void {
+  if (cache.size >= CACHE_MAX) {
+    const firstKey = cache.keys().next().value;
+    if (firstKey) cache.delete(firstKey);
+  }
+  cache.set(key, { ts: Date.now(), result });
+}
 
 function blankTrace(): Trace {
   return { fetchWallMs: 0, readMs: 0, parseMs: 0, transformMs: 0, bytes: 0, batches: 0 };
@@ -41,6 +62,10 @@ function localRerank(query: string, fused: FusedHit[]): FusedHit[] {
 }
 
 export async function runSearch(query: string, depth: number): Promise<SearchResult> {
+  const cacheKey = `${query}::${depth}`;
+  const hit = cacheGet(cacheKey);
+  if (hit) return { ...hit, cached: true, timings: { ...hit.timings, totalMs: 0 } };
+
   const t0 = performance.now();
   const outcomes: SourceOutcome[] = [];
   const perSource = new Map<string, RawResult[]>();
@@ -59,7 +84,8 @@ export async function runSearch(query: string, depth: number): Promise<SearchRes
       perSource.set(r.value.name, r.value.results);
       outcomes.push({ name, ok: true, count: r.value.results.length, trace: r.value.trace });
     } else {
-      outcomes.push({ name, ok: false, count: 0, trace: blankTrace(), err: r.reason?.message ?? String(r.reason) });
+      const err = r.reason?.message ?? String(r.reason);
+      outcomes.push({ name, ok: false, count: 0, trace: blankTrace(), err: err.includes("abort") ? "timeout" : err });
     }
   });
 
@@ -69,12 +95,23 @@ export async function runSearch(query: string, depth: number): Promise<SearchRes
   const hits = localRerank(query, fused);
   const t3 = performance.now();
 
-  return {
+  const result: SearchResult = {
     hits,
     outcomes,
     timings: { fanOutMs: t1 - t0, rrfMs: t2 - t1, rerankMs: t3 - t2, totalMs: t3 - t0 },
-    query,
-    depth,
-    uniqueCount: fused.length
+    query, depth,
+    uniqueCount: fused.length,
+    cached: false
   };
+  const allOk = outcomes.every(o => o.ok);
+  if (allOk) cachePut(cacheKey, result);
+  return result;
+}
+
+export async function prewarm(): Promise<void> {
+  await Promise.allSettled(SOURCES.map(s => {
+    const ctrl = new AbortController();
+    setTimeout(() => ctrl.abort(), 3000);
+    return s.search("test", ctrl.signal, { count: 1 }).catch(() => {});
+  }));
 }

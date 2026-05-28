@@ -33,7 +33,7 @@ async function fetchPage(query: string, hitsPerPage: number, page: number, signa
 export const hackerNews: Source = {
   name: "hn",
   weight: 0.6,
-  defaultCount: 200,
+  defaultCount: 50,
   async search(query, signal, opts = {}) {
     const want = Math.min(opts.count ?? this.defaultCount, MAX);
     const batches = Math.ceil(want / BATCH);

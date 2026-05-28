@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
-import { runSearch, SOURCES } from "./pipeline.ts";
+import { performance } from "node:perf_hooks";
+import { runSearch, SOURCES, prewarm } from "./pipeline.ts";
 
 const PORT = parseInt(process.env.PORT ?? "8080", 10);
 
@@ -48,7 +49,7 @@ function layout(title: string, body: string): string {
 </head><body>${body}</body></html>`;
 }
 
-function searchForm(query = "", depth = 200): string {
+function searchForm(query = "", depth = 100): string {
   return `<form action="/search" method="get">
     <input name="q" value="${esc(query)}" placeholder="search ${SOURCES.map(s => s.name).join(', ')}..." autofocus required>
     <label>depth <input name="depth" type="number" min="10" max="1000" value="${depth}"></label>
@@ -59,9 +60,8 @@ function searchForm(query = "", depth = 200): string {
 function indexPage(): string {
   return layout("hcraes", `
     <h1><a href="/">hcraes</a></h1>
-    <p class="tagline">tiny zero-dep metasearch. ${SOURCES.map(s => `<code>${s.name}</code>`).join(" + ")}. parallel batched fan-out, RRF dedupe, local BM25 rerank.</p>
+    <p class="tagline">zero-dep metasearch. ${SOURCES.map(s => `<code>${s.name}</code>`).join(" + ")}.</p>
     ${searchForm()}
-    <p class="meta">↑ depth = results pulled per source (parallel batches of 100). higher = more recall, ~same wall time.</p>
   `);
 }
 
@@ -96,7 +96,7 @@ function resultsPage(query: string, depth: number, r: Awaited<ReturnType<typeof 
       fan-out ${r.timings.fanOutMs.toFixed(0)}ms &middot;
       RRF ${r.timings.rrfMs.toFixed(1)}ms &middot;
       rerank ${r.timings.rerankMs.toFixed(1)}ms &middot;
-      total <strong>${r.timings.totalMs.toFixed(0)}ms</strong>
+      total <strong>${r.timings.totalMs.toFixed(0)}ms</strong>${r.cached ? ' <span class="badge">cached</span>' : ''}
     </p>
   `);
 }
@@ -111,7 +111,7 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "GET" && url.pathname === "/search") {
       const query = (url.searchParams.get("q") ?? "").trim();
-      const depth = Math.max(10, Math.min(1000, parseInt(url.searchParams.get("depth") ?? "200", 10) || 200));
+      const depth = Math.max(10, Math.min(1000, parseInt(url.searchParams.get("depth") ?? "100", 10) || 100));
       if (!query) {
         res.writeHead(302, { location: "/" });
         res.end();
@@ -132,7 +132,11 @@ const server = createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
   console.log(`hcraes serving on http://localhost:${PORT}`);
   console.log(`sources: ${SOURCES.map(s => s.name).join(", ")}`);
+  console.log("prewarming TLS...");
+  const t0 = performance.now();
+  await prewarm();
+  console.log(`prewarmed in ${(performance.now()-t0).toFixed(0)}ms`);
 });

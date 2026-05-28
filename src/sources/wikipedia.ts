@@ -38,7 +38,7 @@ async function fetchPage(query: string, limit: number, offset: number, signal: A
 export const wikipedia: Source = {
   name: "wikipedia",
   weight: 1.0,
-  defaultCount: 200,
+  defaultCount: 100,
   async search(query, signal, opts = {}) {
     const want = Math.min(opts.count ?? this.defaultCount, MAX);
     const batches = Math.ceil(want / BATCH);
