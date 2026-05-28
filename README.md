@@ -1,53 +1,51 @@
 # hcraes
 
-Tiny BM25 + metasearch. Zero deps. Native Node TS.
+Tiny zero-dep metasearch.
 
-## Requires
+## Sources
 
-- Node >= 23.6 (unflagged type stripping). Tested on Linux/arch, node 26.
+Wikipedia, HN (Algolia), GitHub, Stack Exchange. All CORS-enabled JSON APIs, no auth needed.
 
-## Modes
+## How it works
 
-- **Local BM25** — index `./data/*.txt`, rank.
-- **Web metasearch** — parallel batched fan-out → RRF dedupe → local BM25 rerank. Sources: Wikipedia, HN Algolia, GitHub, Stack Exchange.
-- **Web UI** — 2-page server at `:8080`.
+1. **Parallel fan-out** — fires all 4 source searches concurrently
+2. **Streaming render** — per-source arrival shown as it lands (`↳ stack @ 290ms · 30 hits in 287ms`)
+3. **RRF dedupe** — Reciprocal Rank Fusion (k=60), URL-normalized merge across sources
+4. **Local BM25 rerank** — fused pool gets reranked on title+snippet, top-30 paint
+5. URL is `?q=...&depth=...` shareable, History API updates on submit
 
-## Use
-
-```sh
-./scripts/run.sh "brown dog"             # local BM25
-./scripts/web.sh "linux kernel"          # CLI metasearch
-./scripts/web.sh --depth 300 --top 30 "your query"
-./scripts/serve.sh                       # http://localhost:8080 (PORT=N to override)
-./scripts/bench.sh                       # full bench
-./scripts/test.sh                        # unit tests
-```
-
-Output: `score [sources] title / url / snippet`, sorted desc. `[sources]` shows which engines returned the same URL (RRF dedupe).
+Total: ~250 lines of vanilla JS, ES modules, no build step.
 
 ## Layout
 
 ```
-src/
-  tokenizer / index_store / search / main / tests   local BM25 core
-  fusion                                            RRF (k=60), url-normalized dedupe
-  pipeline                                          shared runSearch (web.ts + server.ts)
-  web / server / bench                              CLIs
-  sources/{wikipedia,hn,github,stackexchange}       each batched, zero-dep
-scripts/{run,web,serve,bench,test}.sh
-data/*.txt
+index.html
+app.js                       DOM wiring, streaming render
+lib/
+  tokenizer.js               lowercase, stopwords, naive stemmer
+  bm25.js                    InvertedIndex + BM25 ranker
+  fusion.js                  RRF (k=60), URL-normalized dedupe
+  pipeline.js                async generator: fan-out + race + fuse + rerank
+sources/
+  wikipedia.js               srlimit + sroffset, parallel batches
+  hn.js                      hitsPerPage + page, parallel batches
+  github.js                  per_page + page, 10 results, opt token via localStorage
+  stack.js                   pagesize + page, parallel batches
 ```
 
-## RRF in one line
+## Run locally
 
-`score += weight_source / (k + rank + 1)`, k=60. Same URL across sources → scores sum. See `src/fusion.ts`.
+Any static server:
 
-## Why parallel batched
+```sh
+python3 -m http.server 8000
+# open http://localhost:8000
+```
 
-Wall time ≈ slowest single batch regardless of depth. 1000 results in ~660ms — same wall as a 10-result single fetch — for 100x more recall. Big pool then BM25-reranked locally (<30ms).
+Or `npx serve`, VS Code Live Server, etc.
 
-## Extend
+## Add a source
 
-- New source: implement `Source` (with batched internals) in `src/sources/`, push into `SOURCES` in `pipeline.ts`.
-- Persist fused pool by query hash → repeats become pure local rerank.
-- Phrase queries: store positions alongside `tf` in `index_store.ts`.
+1. Create `sources/yourname.js` exporting `{ name, weight, defaultCount, search(query, signal, opts) }`
+2. Return `[{ title, url, snippet, rank }]`
+3. Add to `SOURCES` in `lib/pipeline.js`

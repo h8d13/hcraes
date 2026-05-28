@@ -30,10 +30,34 @@ function renderHits(hits, uniqueCount, timings) {
     `${uniqueCount} unique fused · fan-out ${timings.fanOutMs.toFixed(0)}ms · RRF ${timings.rrfMs.toFixed(1)}ms · rerank ${timings.rerankMs.toFixed(1)}ms · total <strong>${timings.totalMs.toFixed(0)}ms</strong>`;
 }
 
+const CACHE_TTL = 60_000;
+function cacheGet(key) {
+  try {
+    const raw = sessionStorage.getItem("hcraes:" + key);
+    if (!raw) return null;
+    const { ts, data } = JSON.parse(raw);
+    if (Date.now() - ts > CACHE_TTL) { sessionStorage.removeItem("hcraes:" + key); return null; }
+    return data;
+  } catch { return null; }
+}
+function cachePut(key, data) {
+  try { sessionStorage.setItem("hcraes:" + key, JSON.stringify({ ts: Date.now(), data })); } catch {}
+}
+
 async function runQuery(query, depth) {
   $("#arrivals").innerHTML = "";
   $("#results").innerHTML = "";
   $("#meta").innerHTML = "";
+  const cacheKey = `${query}::${depth}`;
+
+  const cached = cacheGet(cacheKey);
+  if (cached) {
+    $("#status").textContent = "";
+    $("#arrivals").innerHTML = `<p class="arr">↳ <em>cached</em></p>`;
+    renderHits(cached.hits, cached.uniqueCount, cached.timings);
+    return;
+  }
+
   $("#status").textContent = "streaming sources as they land...";
   window._t0 = performance.now();
 
@@ -44,11 +68,18 @@ async function runQuery(query, depth) {
       } else {
         $("#status").textContent = "";
         renderHits(ev.hits, ev.uniqueCount, ev.timings);
+        cachePut(cacheKey, { hits: ev.hits, uniqueCount: ev.uniqueCount, timings: ev.timings });
       }
     }
   } catch (e) {
     $("#status").innerHTML = `<span style="color:#dc2626">error: ${esc(e?.message ?? String(e))}</span>`;
   }
+}
+
+function prewarm() {
+  const ctrl = new AbortController();
+  setTimeout(() => ctrl.abort(), 3000);
+  for (const s of SOURCES) s.search("test", ctrl.signal, { count: 1 }).catch(() => {});
 }
 
 function readParams() {
@@ -79,6 +110,8 @@ function init() {
     history.pushState(null, "", url);
     runQuery(q, d);
   });
+
+  prewarm();
 
   window.addEventListener("popstate", () => {
     const { query: q, depth: d } = readParams();
