@@ -55,11 +55,34 @@ function cachePut(key, data) {
   try { sessionStorage.setItem("hcraes:" + key, JSON.stringify({ ts: Date.now(), data })); } catch {}
 }
 
+const ENABLED_KEY = "hcraes:enabled";
+function getEnabled() {
+  try {
+    const raw = localStorage.getItem(ENABLED_KEY);
+    if (raw) {
+      const set = new Set(JSON.parse(raw));
+      const valid = SOURCES.filter(s => set.has(s.name)).map(s => s.name);
+      if (valid.length > 0) return new Set(valid);
+    }
+  } catch {}
+  return new Set(SOURCES.map(s => s.name));
+}
+function setEnabled(set) {
+  try { localStorage.setItem(ENABLED_KEY, JSON.stringify([...set])); } catch {}
+}
+function activeSources() {
+  const en = getEnabled();
+  return SOURCES.filter(s => en.has(s.name));
+}
+function activeKey() {
+  return [...getEnabled()].sort().join(",");
+}
+
 async function runQuery(query, depth) {
   $("#arrivals").innerHTML = "";
   $("#results").innerHTML = "";
   $("#meta").innerHTML = "";
-  const cacheKey = `${query}::${depth}`;
+  const cacheKey = `${query}::${depth}::${activeKey()}`;
 
   const cached = cacheGet(cacheKey);
   if (cached) {
@@ -73,7 +96,7 @@ async function runQuery(query, depth) {
   window._t0 = performance.now();
 
   try {
-    for await (const ev of runSearchStream(query, depth)) {
+    for await (const ev of runSearchStream(query, depth, activeSources())) {
       if (ev.type === "source") {
         renderArrival(ev.name, ev.ok, ev.ms, ev.results.length, ev.err);
       } else {
@@ -90,7 +113,24 @@ async function runQuery(query, depth) {
 function prewarm() {
   const ctrl = new AbortController();
   setTimeout(() => ctrl.abort(), 3000);
-  for (const s of SOURCES) s.search("test", ctrl.signal, { count: 1 }).catch(() => {});
+  for (const s of activeSources()) s.search("test", ctrl.signal, { count: 1 }).catch(() => {});
+}
+
+function renderToggles() {
+  const enabled = getEnabled();
+  $(".tagline").innerHTML = `zero-dep metasearch. ` + SOURCES.map(s =>
+    `<button type="button" class="src-toggle ${enabled.has(s.name) ? 'on' : 'off'}" data-name="${esc(s.name)}">${esc(s.name)}</button>`
+  ).join(" ");
+  for (const btn of $$(".src-toggle")) {
+    btn.onclick = () => {
+      const name = btn.dataset.name;
+      const en = getEnabled();
+      if (en.has(name)) en.delete(name); else en.add(name);
+      if (en.size === 0) return;
+      setEnabled(en);
+      renderToggles();
+    };
+  }
 }
 
 function readParams() {
@@ -102,8 +142,7 @@ function readParams() {
 }
 
 function init() {
-  $(".tagline").innerHTML =
-    `zero-dep metasearch. ${SOURCES.map(s => `<code>${s.name}</code>`).join(" + ")}.`;
+  renderToggles();
 
   const { query, depth } = readParams();
   $("input[name=q]").value = query;
