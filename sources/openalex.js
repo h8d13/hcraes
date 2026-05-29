@@ -1,5 +1,9 @@
-const PER_PAGE = 25;
+// OpenAlex `search=` runs a ~4s ranking pass over the full corpus per
+// request, and throttles concurrent searches hard (4 parallel pages -> ~30s).
+// So fetch everything in ONE request: PER_PAGE === MAX -> a single batch.
+// (OpenAlex allows per_page up to 200.)
 const MAX = 100;
+const PER_PAGE = MAX;
 
 // OpenAlex stores abstracts as an inverted index (word -> [positions]).
 // Rebuild the linear text, capped by the caller.
